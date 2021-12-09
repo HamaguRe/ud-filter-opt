@@ -4,6 +4,7 @@
 
 use std::mem::MaybeUninit;
 
+// --------- 入出力数 --------- //
 /// 状態変数の個数
 const SYS_N: usize = 3;
 
@@ -12,6 +13,7 @@ const SYS_R: usize = 2;
 
 /// 出力数
 const SYS_P: usize = 2;
+// ---------------------------- //
 
 // ○次元ベクトル
 type VectorN<T>  = [T; SYS_N];
@@ -54,6 +56,12 @@ fn main() {
     //plot3x3(&c);
 
     // ---- 最初にコレスキー分解するところの行列積が正しいか確認 ----
+    // This result is
+    // u = [
+    //     12, 14,
+    //     11, 17,
+    //      8,  6,
+    // ];
     let a = [
         [2.0, 3.0],
         [1.0, 4.0],
@@ -171,14 +179,11 @@ impl UdFilter {
     /// P_bar = F*P*F^T + G*Q*Q^T
     pub fn predict(&mut self) {
         // Working array
-        let mut qq: VectorNR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
+        let mut qq: VectorN<f64> = unsafe {MaybeUninit::uninit().assume_init()};
         let mut v:  VectorNR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
         let mut z:  VectorNR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
         let mut w:  MatrixNxNR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
         let mut sum: f64;
-        for i in 0..SYS_R {
-            qq[i + SYS_N] = 1.0;
-        }
 
         for i in 0..SYS_N {
             sum = 0.0;
@@ -210,18 +215,24 @@ impl UdFilter {
 
         for j in (1..SYS_N).rev() {
             sum = 0.0;
-            for k in 0..(SYS_N + SYS_R) {
+            for k in 0..SYS_N {
                 v[k] = w[j][k];
                 z[k] = v[k] * qq[k];
                 sum += z[k] * v[k];
             }
+            for k in SYS_N..(SYS_N + SYS_R) {
+                v[k] = w[j][k];
+                z[k] = v[k];
+                sum += v[k] * v[k];
+            }
             self.U[j][j] = sum;
+            let u_recip = self.U[j][j].recip();
             for i in 0..j {
                 sum = 0.0;
                 for k in 0..(SYS_N + SYS_R) {
                     sum += w[i][k] * z[k];
                 }
-                sum = sum / self.U[j][j];
+                sum *= u_recip;
                 for k in 0..(SYS_N + SYS_R) {
                     w[i][k] -= sum * v[k];
                 }
@@ -229,8 +240,11 @@ impl UdFilter {
             }
         }
         sum = 0.0;
-        for k in 0..(SYS_N + SYS_R) {
+        for k in 0..SYS_N {
             sum += qq[k] * (w[0][k] * w[0][k]);
+        }
+        for k in SYS_N..(SYS_N + SYS_R) {
+            sum += w[0][k] * w[0][k];
         }
         self.U[0][0] = sum;
     }
@@ -294,9 +308,9 @@ fn ud_decomp(mut p: MatrixNxN<f64>) -> MatrixNxN<f64> {
 
     for k in (1..SYS_N).rev() {  // n-1, n-2, ..., 1
         ud[k][k] = p[k][k];
+        let ud_recip = ud[k][k].recip();
         for j in 0..k {
-            ud[j][k] = p[j][k] / ud[k][k];
-
+            ud[j][k] *= ud_recip;
             let tmp = ud[j][k] * ud[k][k];
             for i in 0..=j {  // 両側閉区間
                 p[i][j] -= ud[i][k] * tmp;
@@ -317,8 +331,9 @@ fn cholesky_decomp(mut p: MatrixRxR<f64>) -> MatrixRxR<f64> {
 
     for k in (1..SYS_R).rev() {
         u[k][k] = p[k][k].sqrt();
+        let u_recip = u[k][k].recip();
         for j in 0..k {
-            u[j][k] = p[j][k] / u[k][k];
+            u[j][k] *= u_recip;
             for i in 0..=j {
                 p[i][j] -= u[i][k] * u[j][k];
             }
