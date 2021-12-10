@@ -1,6 +1,10 @@
 //! U-D分解フィルタの実装（最適化実装版）
 //!
 //! 参考：片山 徹，”応用カルマンフィルタ”，朝倉書店，pp. 152-154，1983．
+//! 
+//! このプログラムでは，観測ノイズの共分散行列Rを対角行列のみに限定している．
+//! 多くの場合は各観測値が独立で対角行列となるし，仮に対角でない場合も
+//! V = R*R^Tを求め，y:=inverse(V)*y, H:=inverse(V)*H, R:=Iとおけば良い．
 
 use std::mem::MaybeUninit;
 
@@ -15,16 +19,18 @@ const SYS_R: usize = 2;
 const SYS_P: usize = 2;
 // ---------------------------- //
 
-// ○次元ベクトル
+// -- ベクトル・行列型の定義 -- //
+// Vector○: X次元ベクトル
 type VectorN<T>  = [T; SYS_N];
 type VectorP<T>  = [T; SYS_P];
 type VectorNR<T> = [T; SYS_N + SYS_R];
-// ○行○列
+// Matrix○x□: ○行□列行列
 type MatrixNxN<T>  = [[T; SYS_N]; SYS_N];
 type MatrixNxR<T>  = [[T; SYS_R]; SYS_N];
 type MatrixPxN<T>  = [[T; SYS_N]; SYS_P];
 type MatrixRxR<T>  = [[T; SYS_R]; SYS_R];
 type MatrixNxNR<T> = [[T; SYS_N + SYS_R]; SYS_N];  // N x (N+R)
+// ---------------------------- //
 
 fn main() {
     // ---- UD分解が正しいか確認 ----
@@ -42,7 +48,7 @@ fn main() {
     // ];
     let ud = ud_decomp(p);
     print!("UD decomp: ");
-    plot3x3(&ud);
+    plot_nn(&ud);
 
     // ---- コレスキー分解が正しいか確認 ----
     // This result is
@@ -57,7 +63,7 @@ fn main() {
 
     // ---- 最初にコレスキー分解するところの行列積が正しいか確認 ----
     // This result is
-    // u = [
+    // ab = [
     //     12, 14,
     //     11, 17,
     //      8,  6,
@@ -72,10 +78,9 @@ fn main() {
         [2.0, 4.0]
     ];
     let mut ab: MatrixNxR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
-    let mut sum;
-    for i in 0..SYS_N {  // 行列積の計算が合ってるか後で確認
+    for i in 0..SYS_N {
         for j in 0..SYS_R {
-            sum = 0.0;
+            let mut sum = 0.0;
             for k in 0..SYS_R {
                 sum += a[i][k] * b[k][j];
             }
@@ -122,13 +127,17 @@ fn main() {
     for _ in 0..20 {
         
         ud_filter.predict();
-        plot3x3(&ud_filter.U);
+        plot_nn(&ud_filter.U);
         ud_filter.filtering(&[0.0, 0.0]);
         
     }
     
 }
 
+/// U-D分解フィルタ
+/// 
+/// 誤差共分散行列の初期値は零行列以外にしないとU-D分解に失敗するので，
+/// スカラー行列にするのが無難．
 #[allow(non_snake_case)]
 struct UdFilter {
     pub x: VectorN<f64>,    // 状態変数
@@ -153,10 +162,9 @@ impl UdFilter {
         // QをQ=C*C^Tと分解し，Gを改めてG*Cとおく．
         let c = cholesky_decomp(Q);
         let mut gc: MatrixNxR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
-        let mut sum;
         for i in 0..SYS_N {
             for j in 0..SYS_R {
-                sum = 0.0;
+                let mut sum = 0.0;
                 for k in 0..SYS_R {
                     sum += G[i][k] * c[k][j];
                 }
@@ -179,14 +187,13 @@ impl UdFilter {
     /// P_bar = F*P*F^T + G*Q*Q^T
     pub fn predict(&mut self) {
         // Working array
-        let mut qq: VectorN<f64> = unsafe {MaybeUninit::uninit().assume_init()};
-        let mut v:  VectorNR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
-        let mut z:  VectorNR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
+        let mut qq: VectorN<f64>    = unsafe {MaybeUninit::uninit().assume_init()};
+        let mut v:  VectorNR<f64>   = unsafe {MaybeUninit::uninit().assume_init()};
+        let mut z:  VectorNR<f64>   = unsafe {MaybeUninit::uninit().assume_init()};
         let mut w:  MatrixNxNR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
-        let mut sum: f64;
 
         for i in 0..SYS_N {
-            sum = 0.0;
+            let mut sum = 0.0;
             for j in 0..SYS_N {
                 sum += self.F[i][j] * self.x[j];
             }
@@ -196,7 +203,7 @@ impl UdFilter {
             qq[j] = self.U[j][j];
             self.x[j] = v[j];
             for i in 0..SYS_N {
-                sum = self.F[i][j];
+                let mut sum = self.F[i][j];
                 for k in 0..j {
                     sum += self.F[i][k] * self.U[k][j];
                 }
@@ -214,7 +221,7 @@ impl UdFilter {
         // --- ここまででw, qq, self.xを計算
 
         for j in (1..SYS_N).rev() {
-            sum = 0.0;
+            let mut sum = 0.0;
             for k in 0..SYS_N {
                 v[k] = w[j][k];
                 z[k] = v[k] * qq[k];
@@ -239,7 +246,7 @@ impl UdFilter {
                 self.U[i][j] = sum;
             }
         }
-        sum = 0.0;
+        let mut sum = 0.0;
         for k in 0..SYS_N {
             sum += qq[k] * (w[0][k] * w[0][k]);
         }
@@ -257,7 +264,7 @@ impl UdFilter {
 
         // 出力の数だけループ
         for l in 0..SYS_P {
-            let mut y_diff = y[l];
+            let mut y_diff = y[l];  // y_diff := y - H*x
             for j in 0..SYS_N {
                 y_diff -=  self.H[l][j] * self.x[j];
             }
@@ -283,7 +290,7 @@ impl UdFilter {
                 self.U[j][j] = beta * self.U[j][j] * gamma;  // 式 8.48
                 for i in 0..j {
                     beta = self.U[i][j];
-                    self.U[i][j] = beta - lambda * gg[i];  // 式 8.50
+                    self.U[i][j] -= lambda * gg[i];  // 式 8.50
                     gg[i] +=  beta * gg[j];  // 式 8.51
                 }
             }
@@ -304,13 +311,15 @@ impl UdFilter {
 /// 
 /// 返り値は，対角成分をDとし，それ以外の要素をUとした上三角行列．
 fn ud_decomp(mut p: MatrixNxN<f64>) -> MatrixNxN<f64> {
-    let mut ud = [[0.0; SYS_N]; SYS_N];
+    let mut ud: MatrixNxN<f64> = unsafe {MaybeUninit::uninit().assume_init()};
 
     for k in (1..SYS_N).rev() {  // n-1, n-2, ..., 1
         ud[k][k] = p[k][k];
         let ud_recip = ud[k][k].recip();
         for j in 0..k {
             ud[j][k] *= ud_recip;
+            ud[k][j] = 0.0;  // 対角を除いた下三角成分を0埋め
+
             let tmp = ud[j][k] * ud[k][k];
             for i in 0..=j {  // 両側閉区間
                 p[i][j] -= ud[i][k] * tmp;
@@ -327,13 +336,14 @@ fn ud_decomp(mut p: MatrixNxN<f64>) -> MatrixNxN<f64> {
 /// * Pをn×n非負正定値対称行列とする．
 /// * Uは対角要素が非負の値をとるn×n上三角行列．
 fn cholesky_decomp(mut p: MatrixRxR<f64>) -> MatrixRxR<f64> {
-    let mut u = [[0.0; SYS_R]; SYS_R];
+    let mut u: MatrixRxR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
 
     for k in (1..SYS_R).rev() {
         u[k][k] = p[k][k].sqrt();
         let u_recip = u[k][k].recip();
         for j in 0..k {
             u[j][k] *= u_recip;
+            u[k][j] = 0.0;  // 対角を除いた下三角成分を0埋め
             for i in 0..=j {
                 p[i][j] -= u[i][k] * u[j][k];
             }
@@ -345,13 +355,13 @@ fn cholesky_decomp(mut p: MatrixRxR<f64>) -> MatrixRxR<f64> {
 }
 
 /// MatrixNxNを整形してプロット
-fn plot3x3(m: &MatrixNxN<f64>) {
-    println!("Matrix3x3 = [");
+fn plot_nn(m: &MatrixNxN<f64>) {
+    println!("MatrixNxN = [");
     for i in 0..SYS_N {
         print!("    [");
         for j in 0..SYS_N {
             print!("{:.12}", m[i][j]);
-            if j < 2 {
+            if j < (SYS_N - 1) {
                 print!(", ");
             }
         }
