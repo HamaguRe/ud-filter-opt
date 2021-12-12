@@ -33,62 +33,6 @@ type MatrixNxNR<T> = [[T; SYS_N + SYS_R]; SYS_N];  // N x (N+R)
 // ---------------------------- //
 
 fn main() {
-    // ---- UD分解が正しいか確認 ----
-    let p = [
-        [10.0,  7.0, 2.0],
-        [7.0,  10.0, 2.0],
-        [2.0,   2.0, 4.0]
-    ];
-
-    // This result is
-    // ud = [
-    //     5, 2/3, 1/2,
-    //     0,   9, 1/2,
-    //     0,   0,   4,
-    // ];
-    let ud = ud_decomp(p);
-    print!("UD decomp: ");
-    plot_nn(&ud);
-
-    // ---- コレスキー分解が正しいか確認 ----
-    // This result is
-    // u = [
-    //     √5, 2, 1,
-    //       0, 3, 1,
-    //       0, 0, 2,
-    // ];
-    //let c = cholesky_decomp(p);  // SYS_R = 3にして実行
-    //print!("Cholesky decomp: ");
-    //plot3x3(&c);
-
-    // ---- 最初にコレスキー分解するところの行列積が正しいか確認 ----
-    // This result is
-    // ab = [
-    //     12, 14,
-    //     11, 17,
-    //      8,  6,
-    // ];
-    let a = [
-        [2.0, 3.0],
-        [1.0, 4.0],
-        [2.0, 1.0]
-    ];
-    let b = [
-        [3.0, 1.0],
-        [2.0, 4.0]
-    ];
-    let mut ab: MatrixNxR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
-    for i in 0..SYS_N {
-        for j in 0..SYS_R {
-            let mut sum = 0.0;
-            for k in 0..SYS_R {
-                sum += a[i][k] * b[k][j];
-            }
-            ab[i][j] = sum;
-        }
-    }
-    println!("ab: {:?}", ab);
-
     // --- 各行列を定義 --- //
     let p = [
         [1.0, 0.0, 0.0],
@@ -317,7 +261,7 @@ fn ud_decomp(mut p: MatrixNxN<f64>) -> MatrixNxN<f64> {
         ud[k][k] = p[k][k];
         let ud_recip = ud[k][k].recip();
         for j in 0..k {
-            ud[j][k] *= ud_recip;
+            ud[j][k] = p[j][k] * ud_recip;
             ud[k][j] = 0.0;  // 対角を除いた下三角成分を0埋め
 
             let tmp = ud[j][k] * ud[k][k];
@@ -342,7 +286,7 @@ fn cholesky_decomp(mut p: MatrixRxR<f64>) -> MatrixRxR<f64> {
         u[k][k] = p[k][k].sqrt();
         let u_recip = u[k][k].recip();
         for j in 0..k {
-            u[j][k] *= u_recip;
+            u[j][k] = p[j][k] * u_recip;
             u[k][j] = 0.0;  // 対角を除いた下三角成分を0埋め
             for i in 0..=j {
                 p[i][j] -= u[i][k] * u[j][k];
@@ -368,4 +312,44 @@ fn plot_nn(m: &MatrixNxN<f64>) {
         println!("],");
     }
     println!("];");
+}
+
+#[test]
+fn test_ud() {
+    let p = [
+        [10.0,  7.0, 2.0],
+        [7.0,  10.0, 2.0],
+        [2.0,   2.0, 4.0]
+    ];
+
+    let ud = ud_decomp(p);
+    let ud_true = [
+        [5.0, 2.0/3.0, 1.0/2.0],
+        [0.0,     9.0, 1.0/2.0],
+        [0.0,     0.0,     4.0],
+    ];
+    for i in 0..SYS_N {
+        for j in 0..SYS_N {
+            assert!((ud[i][j] - ud_true[i][j]).abs() < 1e-7);
+        }
+    }
+}
+
+#[test]
+fn test_cholesky() {
+    let p = [
+        [10.0,  7.0],
+        [7.0,  10.0],
+    ];
+
+    let c = cholesky_decomp(p);
+    let c_true = [
+        [((100.0 - 49.0)/10.0f64).sqrt(), 7.0/10.0f64.sqrt()],
+        [0.0, 10.0f64.sqrt()]
+    ];
+    for i in 0..SYS_R {
+        for j in 0..SYS_R {
+            assert!((c[i][j] - c_true[i][j]).abs() < 1e-5);
+        }
+    }
 }
