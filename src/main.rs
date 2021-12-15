@@ -6,6 +6,9 @@
 //! 多くの場合は各観測値が独立で対角行列となるし，仮に対角でない場合も
 //! V = R*R^Tを求め，y:=inverse(V)*y, H:=inverse(V)*H, R:=Iとおけば良い．
 
+// 式をそのまま落とし込んだプログラムと比較して結果が正しいことは確認したが，
+// 最適化されすぎていてどこで何を計算してるのかが非常にわかりにくい．
+
 use std::mem::MaybeUninit;
 
 // --------- 入出力数 --------- //
@@ -23,7 +26,6 @@ const SYS_P: usize = 2;
 // Vector○: X次元ベクトル
 type VectorN<T>  = [T; SYS_N];
 type VectorP<T>  = [T; SYS_P];
-type VectorNR<T> = [T; SYS_N + SYS_R];
 // Matrix○x□: ○行□列行列
 type MatrixNxN<T>  = [[T; SYS_N]; SYS_N];
 type MatrixNxR<T>  = [[T; SYS_R]; SYS_N];
@@ -132,20 +134,20 @@ impl UdFilter {
     pub fn predict(&mut self) {
         // Working array
         let mut qq: VectorN<f64>    = unsafe {MaybeUninit::uninit().assume_init()};
-        let mut v:  VectorNR<f64>   = unsafe {MaybeUninit::uninit().assume_init()};
-        let mut z:  VectorNR<f64>   = unsafe {MaybeUninit::uninit().assume_init()};
+        let mut z:  VectorN<f64>    = unsafe {MaybeUninit::uninit().assume_init()};
         let mut w:  MatrixNxNR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
 
+        // 状態変数を更新
         for i in 0..SYS_N {
             let mut sum = 0.0;
             for j in 0..SYS_N {
                 sum += self.F[i][j] * self.x[j];
             }
-            v[i] = sum;
+            qq[i] = sum;
         }
         for j in (1..SYS_N).rev() {
+            self.x[j] = qq[j];
             qq[j] = self.U[j][j];
-            self.x[j] = v[j];
             for i in 0..SYS_N {
                 let mut sum = self.F[i][j];
                 for k in 0..j {
@@ -154,45 +156,46 @@ impl UdFilter {
                 w[i][j] = sum;
             }
         }
+        self.x[0] = qq[0];
+        qq[0] = self.U[0][0];
         for i in 0..SYS_N {
             for j in 0..SYS_R {
                 w[i][j + SYS_N] = self.G[i][j];
             }
             w[i][0] = self.F[i][0];
         }
-        qq[0] = self.U[0][0];
-        self.x[0] = v[0];
         // --- ここまででw, qq, self.xを計算
 
         for j in (1..SYS_N).rev() {
             let mut sum = 0.0;
             for k in 0..SYS_N {
-                v[k] = w[j][k];
-                z[k] = v[k] * qq[k];
-                sum += z[k] * v[k];
+                z[k] = w[j][k] * qq[k];
+                sum += z[k] * w[j][k];
             }
             for k in SYS_N..(SYS_N + SYS_R) {
-                v[k] = w[j][k];
-                z[k] = v[k];
-                sum += v[k] * v[k];
+                sum += w[j][k] * w[j][k];
             }
             self.U[j][j] = sum;
             let u_recip = self.U[j][j].recip();
             for i in 0..j {
                 sum = 0.0;
-                for k in 0..(SYS_N + SYS_R) {
+                for k in 0..SYS_N {
                     sum += w[i][k] * z[k];
                 }
+                for k in SYS_N..(SYS_N + SYS_R) {
+                    sum += w[i][k] * w[j][k];
+                }
+
                 sum *= u_recip;
                 for k in 0..(SYS_N + SYS_R) {
-                    w[i][k] -= sum * v[k];
+                    w[i][k] -= sum * w[j][k];
                 }
                 self.U[i][j] = sum;
             }
         }
         let mut sum = 0.0;
         for k in 0..SYS_N {
-            sum += qq[k] * (w[0][k] * w[0][k]);
+            sum += qq[k] * (w[0][k] * w[0][k]);  // qqには更新前のUの対角要素が入っている
         }
         for k in SYS_N..(SYS_N + SYS_R) {
             sum += w[0][k] * w[0][k];
@@ -314,6 +317,7 @@ fn plot_nn(m: &MatrixNxN<f64>) {
     println!("];");
 }
 
+// ---------------- Test code ---------------- //
 #[test]
 fn test_ud() {
     let p = [
