@@ -12,6 +12,13 @@
 use std::mem::MaybeUninit;
 
 // --------- 入出力数 --------- //
+// 以下の状態空間モデルを考える．
+// x[k+1] = F*x[k] + G*w[k],
+// y[k]   = H*x[k] + v[k].
+// このとき，行列F, G, Hのサイズはそれぞれ
+// F: N×N, G: N×R, H: P×N
+// となる．
+
 /// 状態変数の個数
 const SYS_N: usize = 3;
 
@@ -31,7 +38,7 @@ type MatrixNxN<T>  = [[T; SYS_N]; SYS_N];
 type MatrixNxR<T>  = [[T; SYS_R]; SYS_N];
 type MatrixPxN<T>  = [[T; SYS_N]; SYS_P];
 type MatrixRxR<T>  = [[T; SYS_R]; SYS_R];
-type MatrixNxNR<T> = [[T; SYS_N + SYS_R]; SYS_N];  // N x (N+R)
+type MatrixNxNR<T> = [[T; SYS_N + SYS_R]; SYS_N];  // N×(N+R)
 // ---------------------------- //
 
 fn main() {
@@ -81,9 +88,6 @@ fn main() {
 }
 
 /// U-D分解フィルタ
-/// 
-/// 誤差共分散行列の初期値は零行列以外にしないとU-D分解に失敗するので，
-/// スカラー行列にするのが無難．
 #[allow(non_snake_case)]
 struct UdFilter {
     pub x: VectorN<f64>,    // 状態変数
@@ -95,6 +99,11 @@ struct UdFilter {
 }
 
 impl UdFilter {
+    /// 誤差共分散行列の初期値を零行列にするとU-D分解に失敗するので，
+    /// スカラー行列にするのが無難．
+    /// 
+    /// 状態変数は全て零で初期化する．状態変数xはパブリックメンバにしているので，
+    /// 零以外にしたい場合は構造体を作った後に適宜アクセスして書き換えること．
     #[allow(non_snake_case)]
     pub fn new(
         P: MatrixNxN<f64>,  // 共分散行列の初期値
@@ -145,6 +154,7 @@ impl UdFilter {
             }
             qq[i] = sum;
         }
+        // qqとwの左NxN要素を初期化
         for j in (1..SYS_N).rev() {
             self.x[j] = qq[j];
             qq[j] = self.U[j][j];
@@ -158,6 +168,7 @@ impl UdFilter {
         }
         self.x[0] = qq[0];
         qq[0] = self.U[0][0];
+        // wの右NxR要素を初期化
         for i in 0..SYS_N {
             for j in 0..SYS_R {
                 w[i][j + SYS_N] = self.G[i][j];
