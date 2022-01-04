@@ -16,14 +16,14 @@ use std::mem::MaybeUninit;
 // x[k+1] = F*x[k] + G*w[k],
 // y[k]   = H*x[k] + v[k].
 // このとき，行列F, G, Hのサイズはそれぞれ
-// F: N×N, G: N×R, H: P×N
+// F: N×N, G: N×M, H: P×N
 // となる．
 
 /// 状態変数の個数
 const SYS_N: usize = 3;
 
 /// 入力数
-const SYS_R: usize = 2;
+const SYS_M: usize = 2;
 
 /// 出力数
 const SYS_P: usize = 2;
@@ -35,10 +35,10 @@ type VectorN<T>  = [T; SYS_N];
 type VectorP<T>  = [T; SYS_P];
 // Matrix○x□: ○行□列行列
 type MatrixNxN<T>  = [[T; SYS_N]; SYS_N];
-type MatrixNxR<T>  = [[T; SYS_R]; SYS_N];
+type MatrixNxM<T>  = [[T; SYS_M]; SYS_N];
 type MatrixPxN<T>  = [[T; SYS_N]; SYS_P];
-type MatrixRxR<T>  = [[T; SYS_R]; SYS_R];
-type MatrixNxNR<T> = [[T; SYS_N + SYS_R]; SYS_N];  // N×(N+R)
+type MatrixMxM<T>  = [[T; SYS_M]; SYS_M];
+type MatrixNxNM<T> = [[T; SYS_N + SYS_M]; SYS_N];  // N×(N+M)
 // ---------------------------- //
 
 fn main() {
@@ -93,7 +93,7 @@ struct UdFilter {
     pub x: VectorN<f64>,    // 状態変数
     pub U: MatrixNxN<f64>,  // U-D分解した共分散行列
     F: MatrixNxN<f64>,  // システム行列
-    G: MatrixNxR<f64>,  // 入力行列
+    G: MatrixNxM<f64>,  // 入力行列
     H: MatrixPxN<f64>,  // 出力行列
     R: VectorP<f64>,    // 観測ノイズの共分散行列の対角成分
 }
@@ -108,19 +108,19 @@ impl UdFilter {
     pub fn new(
         P: MatrixNxN<f64>,  // 共分散行列の初期値
         F: MatrixNxN<f64>,  // システム行列
-        G: MatrixNxR<f64>,  // 入力行列
+        G: MatrixNxM<f64>,  // 入力行列
         H: MatrixPxN<f64>,  // 出力行列
-        Q: MatrixRxR<f64>,  // システムノイズの共分散行列
+        Q: MatrixMxM<f64>,  // システムノイズの共分散行列
         R: VectorP<f64>     // 観測ノイズの共分散行列の対角成分
     ) -> Self {
         // システムノイズの分散Qが単位行列で無い場合には，
         // QをQ=C*C^Tと分解し，Gを改めてG*Cとおく．
         let c = cholesky_decomp(Q);
-        let mut gc: MatrixNxR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
+        let mut gc: MatrixNxM<f64> = unsafe {MaybeUninit::uninit().assume_init()};
         for i in 0..SYS_N {
-            for j in 0..SYS_R {
+            for j in 0..SYS_M {
                 let mut sum = 0.0;
-                for k in 0..SYS_R {
+                for k in 0..SYS_M {
                     sum += G[i][k] * c[k][j];
                 }
                 gc[i][j] = sum;
@@ -144,7 +144,7 @@ impl UdFilter {
         // Working array
         let mut qq: VectorN<f64>    = unsafe {MaybeUninit::uninit().assume_init()};
         let mut z:  VectorN<f64>    = unsafe {MaybeUninit::uninit().assume_init()};
-        let mut w:  MatrixNxNR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
+        let mut w:  MatrixNxNM<f64> = unsafe {MaybeUninit::uninit().assume_init()};
 
         // 状態変数を更新
         for i in 0..SYS_N {
@@ -170,7 +170,7 @@ impl UdFilter {
         qq[0] = self.U[0][0];
         // wの右NxR要素を初期化
         for i in 0..SYS_N {
-            for j in 0..SYS_R {
+            for j in 0..SYS_M {
                 w[i][j + SYS_N] = self.G[i][j];
             }
             w[i][0] = self.F[i][0];
@@ -183,7 +183,7 @@ impl UdFilter {
                 z[k] = w[j][k] * qq[k];
                 sum += z[k] * w[j][k];
             }
-            for k in SYS_N..(SYS_N + SYS_R) {
+            for k in SYS_N..(SYS_N + SYS_M) {
                 sum += w[j][k] * w[j][k];
             }
             self.U[j][j] = sum;
@@ -193,12 +193,12 @@ impl UdFilter {
                 for k in 0..SYS_N {
                     sum += w[i][k] * z[k];
                 }
-                for k in SYS_N..(SYS_N + SYS_R) {
+                for k in SYS_N..(SYS_N + SYS_M) {
                     sum += w[i][k] * w[j][k];
                 }
 
                 sum *= u_recip;
-                for k in 0..(SYS_N + SYS_R) {
+                for k in 0..(SYS_N + SYS_M) {
                     w[i][k] -= sum * w[j][k];
                 }
                 self.U[i][j] = sum;
@@ -208,7 +208,7 @@ impl UdFilter {
         for k in 0..SYS_N {
             sum += qq[k] * (w[0][k] * w[0][k]);  // qqには更新前のUの対角要素が入っている
         }
-        for k in SYS_N..(SYS_N + SYS_R) {
+        for k in SYS_N..(SYS_N + SYS_M) {
             sum += w[0][k] * w[0][k];
         }
         self.U[0][0] = sum;
@@ -293,10 +293,10 @@ fn ud_decomp(mut p: MatrixNxN<f64>) -> MatrixNxN<f64> {
 /// 
 /// * Pをn×n非負正定値対称行列とする．
 /// * Uは対角要素が非負の値をとるn×n上三角行列．
-fn cholesky_decomp(mut p: MatrixRxR<f64>) -> MatrixRxR<f64> {
-    let mut u: MatrixRxR<f64> = unsafe {MaybeUninit::uninit().assume_init()};
+fn cholesky_decomp(mut p: MatrixMxM<f64>) -> MatrixMxM<f64> {
+    let mut u: MatrixMxM<f64> = unsafe {MaybeUninit::uninit().assume_init()};
 
-    for k in (1..SYS_R).rev() {
+    for k in (1..SYS_M).rev() {
         u[k][k] = p[k][k].sqrt();
         let u_recip = u[k][k].recip();
         for j in 0..k {
@@ -345,7 +345,7 @@ fn test_ud() {
     ];
     for i in 0..SYS_N {
         for j in 0..SYS_N {
-            assert!((ud[i][j] - ud_true[i][j]).abs() < 1e-7);
+            assert!((ud[i][j] - ud_true[i][j]).abs() < 1e-12);
         }
     }
 }
@@ -362,9 +362,9 @@ fn test_cholesky() {
         [((100.0 - 49.0)/10.0f64).sqrt(), 7.0/10.0f64.sqrt()],
         [0.0, 10.0f64.sqrt()]
     ];
-    for i in 0..SYS_R {
-        for j in 0..SYS_R {
-            assert!((c[i][j] - c_true[i][j]).abs() < 1e-5);
+    for i in 0..SYS_M {
+        for j in 0..SYS_M {
+            assert!((c[i][j] - c_true[i][j]).abs() < 1e-12);
         }
     }
 }
