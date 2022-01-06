@@ -67,9 +67,9 @@ fn main() {
         [0.0, 1.0]
     ];
     let r = [1.0, 1.0];
-    let mut ud_filter = UdFilter::new(p, f, g, h, q, r);
+    let mut uf = UdFilter::new(p, f, g, h, q, r);
 
-    /* 20ループで以下の値に収束する
+    /* 20ループで以下の値に収束する（7桁くらいまで）
     UD: Matrix3x3 = [
         [2.863648175007036, -0.564064186468,     0.654853726808],
         [0.000000000000,     6.195463220228957, -0.857728817252],
@@ -79,12 +79,11 @@ fn main() {
     println!("Loop start!");
     for _ in 0..20 {
         
-        ud_filter.predict();
-        plot_nn(&ud_filter.U);
-        ud_filter.filtering(&[0.0, 0.0]);
+        uf.predict();
+        plot_nn(&uf.U);
+        uf.filtering(&[0.0, 0.0]);
         
-    }
-    
+    }   
 }
 
 /// U-D分解フィルタ
@@ -215,6 +214,8 @@ impl UdFilter {
     }
 
     /// フィルタリングステップ
+    /// 
+    /// y: 出力の観測値
     pub fn filtering(&mut self, y: &VectorP<f64>) {
         // Working array
         let mut ff: VectorN<f64> = unsafe {MaybeUninit::uninit().assume_init()};  // U^T H^T
@@ -222,10 +223,12 @@ impl UdFilter {
 
         // 出力の数だけループ
         for l in 0..SYS_P {
-            let mut y_diff = y[l];  // y_diff := y - H*x
+            // y_diff := y - H*x
+            let mut y_diff = y[l];
             for j in 0..SYS_N {
                 y_diff -=  self.H[l][j] * self.x[j];
             }
+
             for j in (1..SYS_N).rev() {
                 ff[j] = self.H[l][j];
                 for k in 0..j {
